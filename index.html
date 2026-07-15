@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>No-Addon Fullscreen Xterm v4.9.0</title>
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm-js@4.9.0/css/xterm.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm-js@4.9.0/lib/xterm.min.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #1e1e1e;
+      overflow: hidden;
+    }
+
+    #terminal-container {
+      width: 100vw;
+      height: 100vh;
+      box-sizing: border-box;
+      padding: 10px; /* Safe border edge gap */
+    }
+
+    .xterm {
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="terminal-container"></div>
+
+  <script>
+    // 1. Define explicit typography measurements matching your CSS needs
+    const FONT_SIZE = 16;
+    const FONT_FAMILY = 'monospace';
+
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE,
+      theme: { background: '#000000' }
+    });
+
+    const container = document.getElementById('terminal-container');
+    term.open(container);
+
+    // 2. Custom mathematical grid mapping function
+    function resizeTerminalToFillContainer() {
+      // Create a temporary hidden character cell to measure true rendering geometry
+      const probe = document.createElement('div');
+      probe.style.fontFamily = FONT_FAMILY;
+      probe.style.fontSize = `${FONT_SIZE}px`;
+      probe.style.position = 'absolute';
+      probe.style.visibility = 'hidden';
+      probe.style.whiteSpace = 'pre';
+      probe.innerHTML = 'X'; // Single reference test character
+      document.body.appendChild(probe);
+
+      // Extract accurate pixel dimensional properties of a single cell
+      const cellWidth = probe.getBoundingClientRect().width;
+      const cellHeight = probe.getBoundingClientRect().height;
+      document.body.removeChild(probe);
+
+      // Extract parent container's available drawing space bounds
+      const containerWidth = container.clientWidth - parseInt(window.getComputedStyle(container).paddingLeft) * 2;
+      const containerHeight = container.clientHeight - parseInt(window.getComputedStyle(container).paddingTop) * 2;
+
+      // Compute max column count and row boundaries using floor rounding operations
+      const cols = Math.floor(containerWidth / cellWidth);
+      const rows = Math.floor(containerHeight / cellHeight);
+
+      // Apply dimensional grid targets directly back onto the core view context
+      if (cols > 0 && rows > 0) {
+        term.resize(cols, rows);
+      }
+    }
+
+    // 3. Initialize calculation logic when browser updates the document layout tracking
+    setTimeout(() => {
+      resizeTerminalToFillContainer();
+    }, 20);
+
+    term.write('Welcome to khoiios v0.0.1.\r\nCredits to xterm.js for making this possible! \r\n6% of / is used.\r\nNo security upgrades are available. For now.');
+
+    // 4. Update structural scale configurations continuously during window shifts
+    window.addEventListener('resize', () => {
+      resizeTerminalToFillContainer();
+    });
+    // Intercept client typing strokes and feed them directly into the terminal renderer
+    // 1. Maintain local states to track what the user is typing
+    let inputBuffer = '';
+    const promptString = '\r\n\x1b[1;32mmy-terminal\x1b[0m:\x1b[1;34m~\x1b[0m$ ';
+
+    // Write the initial starting prompt line
+    term.write(promptString);
+
+    // 2. Intercept keyboard operations explicitly
+    term.onData(data => {
+    // Read the raw character string input data
+    for (let i = 0; i < data.length; i++) {
+        const char = data[i];
+        const code = char.charCodeAt(0);
+
+        // CASE A: User presses the 'Enter' key
+        if (code === 13) { 
+        processCommand(inputBuffer);
+        inputBuffer = ''; // Flush out buffer for the next command sequence
+        term.write(promptString);
+        } 
+        
+        // CASE B: User presses the 'Backspace' key (Standard Backspace code is 127)
+        else if (code === 127) {
+        if (inputBuffer.length > 0) {
+            inputBuffer = inputBuffer.slice(0, -1);
+            // \b moves cursor back, ' ' overwrites character, \b moves cursor back again
+            term.write('\b \b'); 
+        }
+        } 
+        
+        // CASE C: Ignore control keys (like Up/Down arrow sequences) for simplicity
+        else if (code < 32 && code !== 13) {
+        // Do nothing for miscellaneous functional signals
+        continue;
+        }
+        
+        // CASE D: Regular printable characters
+        else {
+        inputBuffer += char;
+        term.write(char); // Echo character to the UI visually
+        }
+    }
+    });
+
+    // 3. Simple Command Processor Engine
+    function processCommand(command) {
+    // Clean up whitespace layout anomalies
+    const cleanCommand = command.trim();
+    
+    // Jump to a new clear line break boundary
+    term.write('\r\n');
+
+    if (cleanCommand === '') {
+        return; // User just pressed Enter on an empty line
+    }
+
+    // Split input into structural arrays matching command arguments
+    const args = cleanCommand.split(' ');
+    const primaryAction = args[0].toLowerCase();
+
+    // Command Evaluation Switch Routing Structure
+    switch (primaryAction) {
+        case 'help':
+        term.write('Available commands:\r\n');
+        term.write('  help      - Displays this informative text utility pane\r\n');
+        term.write('  hello     - Prints a friendly greeting text block\r\n');
+        term.write('  clear     - Wipes the console viewport completely\r\n');
+        term.write('  echo [ms] - Repeating print routine functionality');
+        break;
+
+        case 'hello':
+        term.write('Hello! - khoii');
+        break;
+
+        case 'clear':
+        term.clear();
+        // Adjust write target pointer offset because clear drops cursor context cleanly to row 0
+        term.write('\r'); 
+        term.clear();
+        break;
+
+        case 'echo':
+        // Extract everything written after the 'echo ' command
+        const message = args.slice(1).join(' ');
+        term.write(message ? message : 'Nothing to echo back.');
+        break;
+
+        case 'meow':
+        // cat!!!
+        term.write("(^-^)");
+        break;
+
+        case 'celeste':
+        // lore
+        term.write("Oh. Her?\r\n");
+        term.write("I've never cared about that for a long time.\r\n");
+        term.write("Pretend I've never said this, alright?\r\n");
+        break;
+
+        case 'lerayne':
+        term.write("Too early for that.");
+        break;
+
+        case 'khoibot':
+        term.write("Current status: recovery");
+        break;
+
+        default:
+        // Red ANSI error feedback notification layout
+        term.write(`\x1b[1;31mError:\x1b[0m Command not found: "${cleanCommand}"`);
+        break;
+    }
+    }
+
+  </script>
+</body>
+</html>
