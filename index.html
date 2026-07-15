@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>No-Addon Fullscreen Xterm v4.9.0</title>
-  
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm-js@4.9.0/css/xterm.min.css" />
-  <script src="https://cdn.jsdelivr.net/npm/xterm-js@4.9.0/lib/xterm.min.js"></script>
+
+  <!-- FIX: the npm package is "xterm", not "xterm-js" (which does not exist on jsDelivr) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@4.9.0/css/xterm.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm@4.9.0/lib/xterm.min.js"></script>
+
+  <!-- Virtual filesystem, kept in its own module. Exposes window.vfs -->
+  <script src="filesystem.js"></script>
 
   <style>
     html, body {
@@ -14,7 +18,7 @@
       padding: 0;
       width: 100%;
       height: 100%;
-      background-color: #1e1e1e;
+      background-color: #000000;
       overflow: hidden;
     }
 
@@ -28,184 +32,701 @@
     .xterm {
       height: 100%;
     }
+
+    #load-error {
+      color: #ff6b6b;
+      font-family: monospace;
+      padding: 20px;
+      display: none;
+    }
   </style>
 </head>
 <body>
 
+  <div id="load-error">
+    Failed to load xterm.js from the CDN. Check your network connection or the script tag above.
+  </div>
   <div id="terminal-container"></div>
 
   <script>
-    // 1. Define explicit typography measurements matching your CSS needs
-    const FONT_SIZE = 16;
-    const FONT_FAMILY = 'monospace';
+    // Guard against the CDN failing to load (this is exactly what broke the original file)
+    if (typeof Terminal === 'undefined') {
+      document.getElementById('load-error').style.display = 'block';
+    } else {
+      // 1. Define explicit typography measurements matching your CSS needs
+      const FONT_SIZE = 16;
+      const FONT_FAMILY = 'monospace';
 
-    const term = new Terminal({
-      cursorBlink: true,
-      fontFamily: FONT_FAMILY,
-      fontSize: FONT_SIZE,
-      theme: { background: '#000000' }
-    });
+      const term = new Terminal({
+        cursorBlink: true,
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE,
+        theme: { background: '#000000' }
+      });
 
-    const container = document.getElementById('terminal-container');
-    term.open(container);
+      const container = document.getElementById('terminal-container');
+      term.open(container);
+      term.focus(); // FIX: without this, clicks/typing don't reliably reach the terminal
 
-    // 2. Custom mathematical grid mapping function
-    function resizeTerminalToFillContainer() {
-      // Create a temporary hidden character cell to measure true rendering geometry
-      const probe = document.createElement('div');
-      probe.style.fontFamily = FONT_FAMILY;
-      probe.style.fontSize = `${FONT_SIZE}px`;
-      probe.style.position = 'absolute';
-      probe.style.visibility = 'hidden';
-      probe.style.whiteSpace = 'pre';
-      probe.innerHTML = 'X'; // Single reference test character
-      document.body.appendChild(probe);
+      // 2. Cache the measured cell size — it only changes if font settings change,
+      // so there's no need to re-measure the DOM on every resize event.
+      let cachedCellWidth = null;
+      let cachedCellHeight = null;
 
-      // Extract accurate pixel dimensional properties of a single cell
-      const cellWidth = probe.getBoundingClientRect().width;
-      const cellHeight = probe.getBoundingClientRect().height;
-      document.body.removeChild(probe);
+      function measureCellSize() {
+        const probe = document.createElement('div');
+        probe.style.fontFamily = FONT_FAMILY;
+        probe.style.fontSize = `${FONT_SIZE}px`;
+        probe.style.position = 'absolute';
+        probe.style.visibility = 'hidden';
+        probe.style.whiteSpace = 'pre';
+        probe.innerHTML = 'X';
+        document.body.appendChild(probe);
 
-      // Extract parent container's available drawing space bounds
-      const containerWidth = container.clientWidth - parseInt(window.getComputedStyle(container).paddingLeft) * 2;
-      const containerHeight = container.clientHeight - parseInt(window.getComputedStyle(container).paddingTop) * 2;
+        const rect = probe.getBoundingClientRect();
+        document.body.removeChild(probe);
 
-      // Compute max column count and row boundaries using floor rounding operations
-      const cols = Math.floor(containerWidth / cellWidth);
-      const rows = Math.floor(containerHeight / cellHeight);
+        cachedCellWidth = rect.width;
+        cachedCellHeight = rect.height;
+      }
 
-      // Apply dimensional grid targets directly back onto the core view context
-      if (cols > 0 && rows > 0) {
-        term.resize(cols, rows);
+      // 3. Custom mathematical grid mapping function
+      function resizeTerminalToFillContainer() {
+        if (cachedCellWidth === null) measureCellSize();
+
+        // Extract parent container's available drawing space bounds
+        const style = window.getComputedStyle(container);
+        const containerWidth = container.clientWidth - parseInt(style.paddingLeft) * 2;
+        const containerHeight = container.clientHeight - parseInt(style.paddingTop) * 2;
+
+        // Compute max column count and row boundaries using floor rounding operations
+        const cols = Math.floor(containerWidth / cachedCellWidth);
+        const rows = Math.floor(containerHeight / cachedCellHeight);
+
+        // Apply dimensional grid targets directly back onto the core view context
+        if (cols > 0 && rows > 0) {
+          term.resize(cols, rows);
+        }
+      }
+
+      // 4. Initialize calculation logic when browser updates the document layout tracking
+      setTimeout(() => {
+        resizeTerminalToFillContainer();
+      }, 20);
+
+      term.write('Welcome to khoiios v0.0.1.\r\nCredits to xterm.js for making this possible! \r\n6% of / is used.\r\nNo security upgrades are available. For now.\r\nType "help" for commands. Your files persist in localStorage.');
+
+      // 5. Update structural scale configurations continuously during window shifts.
+      let resizeScheduled = false;
+      const scheduleResize = () => {
+        if (resizeScheduled) return;
+        resizeScheduled = true;
+        requestAnimationFrame(() => {
+          resizeTerminalToFillContainer();
+          resizeScheduled = false;
+        });
+      };
+
+      if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(scheduleResize).observe(container);
+      } else {
+        window.addEventListener('resize', scheduleResize);
+      }
+
+      // -----------------------------------------------------------------
+      // Shell state
+      // -----------------------------------------------------------------
+      let inputBuffer = '';
+      let mode = 'shell'; // 'shell' | 'nano'
+
+      function promptString() {
+        return `\r\n\x1b[1;32mkhoiios\x1b[0m:\x1b[1;34m${window.vfs.pwd()}\x1b[0m$ `;
+      }
+
+      // Write the initial starting prompt line
+      term.write(promptString());
+
+      // -----------------------------------------------------------------
+      // nano: a real full-screen editor.
+      //   - 2D cursor (row/col) with insert-in-place editing, not append-only
+      //   - Arrow keys, Home/End, PageUp/PageDown, Delete
+      //   - Scrolling viewport for files taller than the terminal
+      //   - Screen-relative rendering via ANSI cursor addressing (no more
+      //     term.clear()-and-reprint-everything on every keystroke)
+      //   - ^O Write Out, ^X Exit (w/ save prompt), ^C cursor pos,
+      //     ^K Cut Line, ^U Paste Line, Delete/^D delete-forward
+      // -----------------------------------------------------------------
+      const NANO_VERSION = 'GNU nano 7.2';
+      let nanoCutBuffer = null;
+
+      const nanoState = {
+        path: null,
+        lines: [''],
+        cursorRow: 0,   // index into lines
+        cursorCol: 0,   // character index into the current line
+        topLine: 0,     // first visible line (viewport scroll offset)
+        modified: false,
+        subMode: 'edit', // 'edit' | 'exitConfirm'
+        statusMsg: '',
+      };
+
+      function padCenter(text, width) {
+        if (text.length >= width) return text.slice(0, width);
+        const totalPad = width - text.length;
+        const left = Math.floor(totalPad / 2);
+        return ' '.repeat(left) + text + ' '.repeat(totalPad - left);
+      }
+
+      function nanoTextAreaHeight() {
+        // total rows minus: title bar, status line, 2 shortcut rows
+        return Math.max(1, (term.rows || 24) - 4);
+      }
+
+      function nanoTitleBar(cols) {
+        const filename = nanoState.path + (nanoState.modified ? ' *' : '');
+        let bar = (' ' + NANO_VERSION).padEnd(cols, ' ');
+        const centerStart = Math.max(0, Math.floor((cols - filename.length) / 2));
+        bar = bar.slice(0, centerStart) + filename + bar.slice(centerStart + filename.length);
+        return `\x1b[7m${bar.padEnd(cols, ' ').slice(0, cols)}\x1b[0m`;
+      }
+
+      function nanoStatusLine(cols) {
+        return `\x1b[7m${padCenter(nanoState.statusMsg || '', cols)}\x1b[0m`;
+      }
+
+      function nanoShortcutRow(entries, cols) {
+        const colWidth = Math.max(14, Math.floor(cols / entries.length));
+        let row = '';
+        for (const [key, label] of entries) {
+          const cell = `\x1b[7m${key}\x1b[0m ${label}`;
+          const visibleLen = key.length + 1 + label.length;
+          row += cell + ' '.repeat(Math.max(1, colWidth - visibleLen));
+        }
+        return row;
+      }
+
+      // Full screen-relative redraw: positions via ANSI cursor addressing
+      // instead of clearing and reprinting, so it behaves like a real
+      // full-screen TUI app rather than a scrolling log.
+      function drawNanoScreen() {
+        const cols = term.cols || 80;
+        const textAreaHeight = nanoTextAreaHeight();
+
+        // Keep the cursor's line inside the visible viewport (scrolling).
+        if (nanoState.cursorRow < nanoState.topLine) {
+          nanoState.topLine = nanoState.cursorRow;
+        } else if (nanoState.cursorRow >= nanoState.topLine + textAreaHeight) {
+          nanoState.topLine = nanoState.cursorRow - textAreaHeight + 1;
+        }
+
+        let out = '\x1b[?25l'; // hide cursor while painting to avoid flicker
+
+        out += `\x1b[1;1H\x1b[2K${nanoTitleBar(cols)}`;
+
+        for (let i = 0; i < textAreaHeight; i++) {
+          const lineIdx = nanoState.topLine + i;
+          const termRow = i + 2;
+          out += `\x1b[${termRow};1H\x1b[2K`;
+          if (lineIdx < nanoState.lines.length) {
+            out += nanoState.lines[lineIdx].slice(0, cols);
+          }
+        }
+
+        const statusRow = textAreaHeight + 2;
+        out += `\x1b[${statusRow};1H\x1b[2K${nanoStatusLine(cols)}`;
+
+        if (nanoState.subMode === 'exitConfirm') {
+          out += `\x1b[${statusRow + 1};1H\x1b[2KSave modified buffer?`;
+          out += `\x1b[${statusRow + 2};1H\x1b[2K${nanoShortcutRow([[' Y', 'Yes'], [' N', 'No'], ['^C', 'Cancel']], cols)}`;
+        } else {
+          const row1 = nanoShortcutRow(
+            [['^G', 'Help'], ['^O', 'Write Out'], ['^W', 'Where Is'], ['^K', 'Cut Line']],
+            cols
+          );
+          const row2 = nanoShortcutRow(
+            [['^X', 'Exit'], ['^C', 'Cur Pos'], ['^R', 'Read File'], ['^U', 'Paste']],
+            cols
+          );
+          out += `\x1b[${statusRow + 1};1H\x1b[2K${row1}`;
+          out += `\x1b[${statusRow + 2};1H\x1b[2K${row2}`;
+        }
+
+        // Place the real terminal cursor where the editor's cursor is.
+        const screenRow = (nanoState.cursorRow - nanoState.topLine) + 2;
+        const screenCol = Math.min(nanoState.cursorCol, cols - 1) + 1;
+        out += `\x1b[${screenRow};${screenCol}H\x1b[?25h`;
+
+        term.write(out);
+      }
+
+      function enterNano(path) {
+        mode = 'nano';
+        nanoState.path = path;
+        const existing = window.vfs.isFile(path) ? window.vfs.readFile(path) : null;
+        const content = existing && existing.ok ? existing.content : '';
+        nanoState.lines = content.length > 0 ? content.split('\n') : [''];
+        nanoState.cursorRow = 0;
+        nanoState.cursorCol = 0;
+        nanoState.topLine = 0;
+        nanoState.modified = false;
+        nanoState.subMode = 'edit';
+        nanoState.statusMsg = `[ Read ${nanoState.lines.length} lines ]`;
+        drawNanoScreen();
+      }
+
+      function saveNanoBuffer(exitAfter) {
+        const content = nanoState.lines.join('\n');
+        window.vfs.writeFile(nanoState.path, content);
+        nanoState.modified = false;
+        if (exitAfter) {
+          leaveNanoToShell();
+        } else {
+          nanoState.statusMsg = `[ Wrote ${nanoState.lines.length} lines ]`;
+          nanoState.subMode = 'edit';
+          drawNanoScreen();
+        }
+      }
+
+      function leaveNanoToShell() {
+        mode = 'shell';
+        term.write('\x1b[?25h');
+        term.clear();
+        term.write(promptString());
+      }
+
+      function nanoDeleteForward() {
+        const lines = nanoState.lines;
+        const line = lines[nanoState.cursorRow];
+        if (nanoState.cursorCol < line.length) {
+          lines[nanoState.cursorRow] = line.slice(0, nanoState.cursorCol) + line.slice(nanoState.cursorCol + 1);
+          nanoState.modified = true;
+        } else if (nanoState.cursorRow < lines.length - 1) {
+          lines[nanoState.cursorRow] = line + lines[nanoState.cursorRow + 1];
+          lines.splice(nanoState.cursorRow + 1, 1);
+          nanoState.modified = true;
+        }
+      }
+
+      function nanoCutLine() {
+        nanoCutBuffer = nanoState.lines[nanoState.cursorRow];
+        if (nanoState.lines.length === 1) {
+          nanoState.lines[0] = '';
+        } else {
+          nanoState.lines.splice(nanoState.cursorRow, 1);
+          if (nanoState.cursorRow >= nanoState.lines.length) {
+            nanoState.cursorRow = nanoState.lines.length - 1;
+          }
+        }
+        nanoState.cursorCol = 0;
+        nanoState.modified = true;
+      }
+
+      function nanoPasteLine() {
+        if (nanoCutBuffer === null) return;
+        nanoState.lines.splice(nanoState.cursorRow, 0, nanoCutBuffer);
+        nanoState.cursorRow += 1;
+        nanoState.modified = true;
+      }
+
+      // Cursor-movement and other named (non-printable) keys, decoded from
+      // ANSI escape sequences by handleNanoDataChunk below.
+      function nanoHandleKey(name) {
+        if (nanoState.subMode !== 'edit') return;
+        const lines = nanoState.lines;
+        const textAreaHeight = nanoTextAreaHeight();
+
+        switch (name) {
+          case 'up':
+            if (nanoState.cursorRow > 0) {
+              nanoState.cursorRow--;
+              nanoState.cursorCol = Math.min(nanoState.cursorCol, lines[nanoState.cursorRow].length);
+            }
+            break;
+          case 'down':
+            if (nanoState.cursorRow < lines.length - 1) {
+              nanoState.cursorRow++;
+              nanoState.cursorCol = Math.min(nanoState.cursorCol, lines[nanoState.cursorRow].length);
+            }
+            break;
+          case 'left':
+            if (nanoState.cursorCol > 0) {
+              nanoState.cursorCol--;
+            } else if (nanoState.cursorRow > 0) {
+              nanoState.cursorRow--;
+              nanoState.cursorCol = lines[nanoState.cursorRow].length;
+            }
+            break;
+          case 'right':
+            if (nanoState.cursorCol < lines[nanoState.cursorRow].length) {
+              nanoState.cursorCol++;
+            } else if (nanoState.cursorRow < lines.length - 1) {
+              nanoState.cursorRow++;
+              nanoState.cursorCol = 0;
+            }
+            break;
+          case 'home':
+            nanoState.cursorCol = 0;
+            break;
+          case 'end':
+            nanoState.cursorCol = lines[nanoState.cursorRow].length;
+            break;
+          case 'delete':
+            nanoDeleteForward();
+            break;
+          case 'pageup':
+            nanoState.cursorRow = Math.max(0, nanoState.cursorRow - textAreaHeight);
+            nanoState.cursorCol = Math.min(nanoState.cursorCol, lines[nanoState.cursorRow].length);
+            break;
+          case 'pagedown':
+            nanoState.cursorRow = Math.min(lines.length - 1, nanoState.cursorRow + textAreaHeight);
+            nanoState.cursorCol = Math.min(nanoState.cursorCol, lines[nanoState.cursorRow].length);
+            break;
+        }
+        nanoState.statusMsg = '';
+      }
+
+      // Single "typed" character or control code.
+      function nanoHandleChar(char, code) {
+        if (nanoState.subMode === 'exitConfirm') {
+          const lower = char.toLowerCase();
+          if (code === 3) {
+            nanoState.subMode = 'edit';
+            nanoState.statusMsg = 'Cancelled';
+          } else if (lower === 'y') {
+            saveNanoBuffer(true);
+          } else if (lower === 'n') {
+            exitNanoWithoutSaving_ifClean();
+          }
+          return;
+        }
+
+        if (code === 15) { saveNanoBuffer(false); return; }        // ^O Write Out
+        if (code === 24) {                                          // ^X Exit
+          if (nanoState.modified) {
+            nanoState.subMode = 'exitConfirm';
+          } else {
+            leaveNanoToShell();
+          }
+          return;
+        }
+        if (code === 3) {                                           // ^C cursor position
+          nanoState.statusMsg = `[ line ${nanoState.cursorRow + 1}/${nanoState.lines.length}, col ${nanoState.cursorCol + 1} ]`;
+          return;
+        }
+        if (code === 4) { nanoDeleteForward(); nanoState.statusMsg = ''; return; } // ^D delete-forward
+        if (code === 11) { nanoCutLine(); nanoState.statusMsg = '[ Cut line ]'; return; } // ^K
+        if (code === 21) { nanoPasteLine(); nanoState.statusMsg = '[ Pasted line ]'; return; } // ^U
+
+        if (code === 13) {                                          // Enter: split line
+          const line = nanoState.lines[nanoState.cursorRow];
+          const before = line.slice(0, nanoState.cursorCol);
+          const after = line.slice(nanoState.cursorCol);
+          nanoState.lines.splice(nanoState.cursorRow, 1, before, after);
+          nanoState.cursorRow++;
+          nanoState.cursorCol = 0;
+          nanoState.modified = true;
+          nanoState.statusMsg = '';
+          return;
+        }
+
+        if (code === 127 || code === 8) {                           // Backspace
+          if (nanoState.cursorCol > 0) {
+            const line = nanoState.lines[nanoState.cursorRow];
+            nanoState.lines[nanoState.cursorRow] = line.slice(0, nanoState.cursorCol - 1) + line.slice(nanoState.cursorCol);
+            nanoState.cursorCol--;
+            nanoState.modified = true;
+          } else if (nanoState.cursorRow > 0) {
+            const prevLine = nanoState.lines[nanoState.cursorRow - 1];
+            const curLine = nanoState.lines[nanoState.cursorRow];
+            nanoState.cursorCol = prevLine.length;
+            nanoState.lines[nanoState.cursorRow - 1] = prevLine + curLine;
+            nanoState.lines.splice(nanoState.cursorRow, 1);
+            nanoState.cursorRow--;
+            nanoState.modified = true;
+          }
+          nanoState.statusMsg = '';
+          return;
+        }
+
+        if (code < 32) return; // ignore other unhandled control chars (^G, ^W, ^R, ...)
+
+        // Printable: insert at the cursor position (not just append).
+        const line = nanoState.lines[nanoState.cursorRow];
+        nanoState.lines[nanoState.cursorRow] = line.slice(0, nanoState.cursorCol) + char + line.slice(nanoState.cursorCol);
+        nanoState.cursorCol++;
+        nanoState.modified = true;
+        nanoState.statusMsg = '';
+      }
+
+      function exitNanoWithoutSaving_ifClean() {
+        leaveNanoToShell();
+      }
+
+      // Known ANSI escape sequences xterm.js sends for special keys in the
+      // default (non-application) cursor key mode.
+      const NANO_ESCAPE_SEQUENCES = [
+        ['\x1b[A', 'up'], ['\x1b[B', 'down'], ['\x1b[C', 'right'], ['\x1b[D', 'left'],
+        ['\x1b[H', 'home'], ['\x1b[F', 'end'], ['\x1bOH', 'home'], ['\x1bOF', 'end'],
+        ['\x1b[3~', 'delete'], ['\x1b[5~', 'pageup'], ['\x1b[6~', 'pagedown'],
+      ];
+
+      // Process a whole onData chunk at once (so multi-byte escape sequences
+      // aren't split apart), then redraw once.
+      function handleNanoDataChunk(data) {
+        let i = 0;
+        while (i < data.length) {
+          let matched = null;
+          for (const [seq, name] of NANO_ESCAPE_SEQUENCES) {
+            if (data.startsWith(seq, i)) { matched = { seq, name }; break; }
+          }
+          if (matched) {
+            nanoHandleKey(matched.name);
+            i += matched.seq.length;
+            continue;
+          }
+          nanoHandleChar(data[i], data.charCodeAt(i));
+          i += 1;
+        }
+        if (mode === 'nano') drawNanoScreen();
+      }
+
+      // -----------------------------------------------------------------
+      // Key interception
+      // -----------------------------------------------------------------
+      term.onData(data => {
+        for (let i = 0; i < data.length; i++) {
+          const char = data[i];
+          const code = char.charCodeAt(0);
+
+          if (mode === 'nano') {
+            handleNanoData(char, code);
+            continue;
+          }
+
+          // CASE A: User presses the 'Enter' key
+          if (code === 13) {
+            processCommand(inputBuffer);
+            inputBuffer = '';
+            if (mode === 'shell') term.write(promptString());
+          }
+
+          // CASE B: Backspace
+          else if (code === 127) {
+            if (inputBuffer.length > 0) {
+              inputBuffer = inputBuffer.slice(0, -1);
+              term.write('\b \b');
+            }
+          }
+
+          // CASE C: Ignore other control keys
+          else if (code < 32 && code !== 13) {
+            continue;
+          }
+
+          // CASE D: Regular printable characters
+          else {
+            inputBuffer += char;
+            term.write(char);
+          }
+        }
+      });
+
+      // -----------------------------------------------------------------
+      // Command processor
+      // -----------------------------------------------------------------
+
+      // Minimal shell-style tokenizer: supports "quoted strings" as one token.
+      function tokenize(command) {
+        const tokens = [];
+        const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+        let match;
+        while ((match = re.exec(command)) !== null) {
+          tokens.push(match[1] ?? match[2] ?? match[3]);
+        }
+        return tokens;
+      }
+
+      function formatLsEntries(entries) {
+        return entries
+          .map((e) => (e.type === 'dir' ? `\x1b[1;34m${e.name}/\x1b[0m` : e.name))
+          .join('  ');
+      }
+
+      function processCommand(command) {
+        const cleanCommand = command.trim();
+        term.write('\r\n');
+
+        if (cleanCommand === '') {
+          return;
+        }
+
+        const args = tokenize(cleanCommand);
+        const primaryAction = args[0].toLowerCase();
+        const rest = args.slice(1);
+
+        switch (primaryAction) {
+          case 'help':
+            term.write('Available commands:\r\n');
+            term.write('  help              - Show this help text\r\n');
+            term.write('  hello             - Prints a friendly greeting\r\n');
+            term.write('  clear             - Wipes the console viewport\r\n');
+            term.write('  echo [text]       - Prints text back\r\n');
+            term.write('  pwd               - Print working directory\r\n');
+            term.write('  ls [path]         - List directory contents\r\n');
+            term.write('  cd [path]         - Change directory\r\n');
+            term.write('  mkdir [-p] <dir>  - Make a directory (-p creates parents)\r\n');
+            term.write('  touch <file>      - Create an empty file / update timestamp\r\n');
+            term.write('  cat <file>        - Print file contents\r\n');
+            term.write('  nano <file>       - Edit a file (^O write, ^X exit, ^C cursor pos)\r\n');
+            term.write('  rm [-r] <path>    - Remove a file or directory\r\n');
+            term.write('  cp [-r] <src> <dst> - Copy a file or directory\r\n');
+            term.write('  mv <src> <dst>    - Move / rename a file or directory\r\n');
+            term.write('  reset-fs          - Wipe the entire virtual filesystem');
+            break;
+
+          case 'hello':
+            term.write('Hello! - khoii');
+            break;
+
+          case 'clear':
+            term.clear();
+            break;
+
+          case 'echo':
+            term.write(rest.join(' ') || 'Nothing to echo back.');
+            break;
+
+          case 'meow':
+            term.write('(^-^)');
+            break;
+
+          case 'khoibot':
+            term.write('Current status: alive');
+            break;
+
+          // ---------------------------------------------------- filesystem
+
+          case 'pwd':
+            term.write(window.vfs.pwd());
+            break;
+
+          case 'ls': {
+            const path = rest.filter((a) => !a.startsWith('-'))[0];
+            const result = window.vfs.ls(path);
+            if (!result.ok) {
+              term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            } else if (result.entries.length === 0) {
+              term.write('');
+            } else {
+              term.write(formatLsEntries(result.entries));
+            }
+            break;
+          }
+
+          case 'cd': {
+            const target = rest[0] || '/';
+            const result = window.vfs.cd(target);
+            if (!result.ok) term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            break;
+          }
+
+          case 'mkdir': {
+            const recursive = rest.includes('-p');
+            const target = rest.filter((a) => a !== '-p')[0];
+            if (!target) {
+              term.write('\x1b[1;31mError:\x1b[0m mkdir: missing operand');
+              break;
+            }
+            const result = window.vfs.mkdir(target, recursive);
+            if (!result.ok) term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            break;
+          }
+
+          case 'touch': {
+            const target = rest[0];
+            if (!target) {
+              term.write('\x1b[1;31mError:\x1b[0m touch: missing operand');
+              break;
+            }
+            const result = window.vfs.touch(target);
+            if (!result.ok) term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            break;
+          }
+
+          case 'cat': {
+            const target = rest[0];
+            if (!target) {
+              term.write('\x1b[1;31mError:\x1b[0m cat: missing operand');
+              break;
+            }
+            const result = window.vfs.readFile(target);
+            if (!result.ok) {
+              term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            } else {
+              term.write(result.content.split('\n').join('\r\n'));
+            }
+            break;
+          }
+
+          case 'nano': {
+            const target = rest[0];
+            if (!target) {
+              term.write('\x1b[1;31mError:\x1b[0m nano: missing filename');
+              break;
+            }
+            // Ensure the file exists before editing, mirroring real nano.
+            if (!window.vfs.exists(target)) window.vfs.touch(target);
+            enterNano(target);
+            break;
+          }
+
+          case 'rm': {
+            const recursive = rest.includes('-r') || rest.includes('-rf');
+            const target = rest.filter((a) => !a.startsWith('-'))[0];
+            if (!target) {
+              term.write('\x1b[1;31mError:\x1b[0m rm: missing operand');
+              break;
+            }
+            const result = window.vfs.rm(target, recursive);
+            if (!result.ok) term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            break;
+          }
+
+          case 'cp': {
+            const recursive = rest.includes('-r');
+            const positional = rest.filter((a) => !a.startsWith('-'));
+            const [src, dest] = positional;
+            if (!src || !dest) {
+              term.write('\x1b[1;31mError:\x1b[0m cp: usage: cp [-r] <src> <dest>');
+              break;
+            }
+            const result = window.vfs.cp(src, dest, recursive);
+            if (!result.ok) term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            break;
+          }
+
+          case 'mv': {
+            const [src, dest] = rest;
+            if (!src || !dest) {
+              term.write('\x1b[1;31mError:\x1b[0m mv: usage: mv <src> <dest>');
+              break;
+            }
+            const result = window.vfs.mv(src, dest);
+            if (!result.ok) term.write(`\x1b[1;31mError:\x1b[0m ${result.error}`);
+            break;
+          }
+
+          case 'reset-fs':
+            window.vfs.reset();
+            term.write('Filesystem reset to defaults.');
+            break;
+
+          default:
+            term.write(`\x1b[1;31mError:\x1b[0m Command not found: "${cleanCommand}"`);
+            break;
+        }
       }
     }
-
-    // 3. Initialize calculation logic when browser updates the document layout tracking
-    setTimeout(() => {
-      resizeTerminalToFillContainer();
-    }, 20);
-
-    term.write('Welcome to khoiios v0.0.1.\r\nCredits to xterm.js for making this possible! \r\n6% of / is used.\r\nNo security upgrades are available. For now.');
-
-    // 4. Update structural scale configurations continuously during window shifts
-    window.addEventListener('resize', () => {
-      resizeTerminalToFillContainer();
-    });
-    // Intercept client typing strokes and feed them directly into the terminal renderer
-    // 1. Maintain local states to track what the user is typing
-    let inputBuffer = '';
-    const promptString = '\r\n\x1b[1;32mmy-terminal\x1b[0m:\x1b[1;34m~\x1b[0m$ ';
-
-    // Write the initial starting prompt line
-    term.write(promptString);
-
-    // 2. Intercept keyboard operations explicitly
-    term.onData(data => {
-    // Read the raw character string input data
-    for (let i = 0; i < data.length; i++) {
-        const char = data[i];
-        const code = char.charCodeAt(0);
-
-        // CASE A: User presses the 'Enter' key
-        if (code === 13) { 
-        processCommand(inputBuffer);
-        inputBuffer = ''; // Flush out buffer for the next command sequence
-        term.write(promptString);
-        } 
-        
-        // CASE B: User presses the 'Backspace' key (Standard Backspace code is 127)
-        else if (code === 127) {
-        if (inputBuffer.length > 0) {
-            inputBuffer = inputBuffer.slice(0, -1);
-            // \b moves cursor back, ' ' overwrites character, \b moves cursor back again
-            term.write('\b \b'); 
-        }
-        } 
-        
-        // CASE C: Ignore control keys (like Up/Down arrow sequences) for simplicity
-        else if (code < 32 && code !== 13) {
-        // Do nothing for miscellaneous functional signals
-        continue;
-        }
-        
-        // CASE D: Regular printable characters
-        else {
-        inputBuffer += char;
-        term.write(char); // Echo character to the UI visually
-        }
-    }
-    });
-
-    // 3. Simple Command Processor Engine
-    function processCommand(command) {
-    // Clean up whitespace layout anomalies
-    const cleanCommand = command.trim();
-    
-    // Jump to a new clear line break boundary
-    term.write('\r\n');
-
-    if (cleanCommand === '') {
-        return; // User just pressed Enter on an empty line
-    }
-
-    // Split input into structural arrays matching command arguments
-    const args = cleanCommand.split(' ');
-    const primaryAction = args[0].toLowerCase();
-
-    // Command Evaluation Switch Routing Structure
-    switch (primaryAction) {
-        case 'help':
-        term.write('Available commands:\r\n');
-        term.write('  help      - Displays this informative text utility pane\r\n');
-        term.write('  hello     - Prints a friendly greeting text block\r\n');
-        term.write('  clear     - Wipes the console viewport completely\r\n');
-        term.write('  echo [ms] - Repeating print routine functionality');
-        break;
-
-        case 'hello':
-        term.write('Hello! - khoii');
-        break;
-
-        case 'clear':
-        term.clear();
-        // Adjust write target pointer offset because clear drops cursor context cleanly to row 0
-        term.write('\r'); 
-        term.clear();
-        break;
-
-        case 'echo':
-        // Extract everything written after the 'echo ' command
-        const message = args.slice(1).join(' ');
-        term.write(message ? message : 'Nothing to echo back.');
-        break;
-
-        case 'meow':
-        // cat!!!
-        term.write("(^-^)");
-        break;
-
-        case 'celeste':
-        // lore
-        term.write("Oh. Her?\r\n");
-        term.write("I've never cared about that for a long time.\r\n");
-        term.write("Pretend I've never said this, alright?\r\n");
-        break;
-
-        case 'lerayne':
-        term.write("Too early for that.");
-        break;
-
-        case 'khoibot':
-        term.write("Current status: recovery");
-        break;
-
-        default:
-        // Red ANSI error feedback notification layout
-        term.write(`\x1b[1;31mError:\x1b[0m Command not found: "${cleanCommand}"`);
-        break;
-    }
-    }
-
   </script>
 </body>
 </html>
